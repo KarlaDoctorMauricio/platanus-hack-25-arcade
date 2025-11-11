@@ -1,432 +1,277 @@
-// Platanus Hack 25: Snake Game
-// Navigate the snake around the "PLATANUS HACK ARCADE" title made of blocks!
-
-// =============================================================================
-// ARCADE BUTTON MAPPING - COMPLETE TEMPLATE
-// =============================================================================
-// Reference: See button-layout.webp at hack.platan.us/assets/images/arcade/
-//
-// Maps arcade button codes to keyboard keys for local testing.
-// Each arcade code can map to multiple keyboard keys (array values).
-// The arcade cabinet sends codes like 'P1U', 'P1A', etc. when buttons are pressed.
-//
-// To use in your game:
-//   if (key === 'P1U') { ... }  // Works on both arcade and local (via keyboard)
-//
-// CURRENT GAME USAGE (Snake):
-//   - P1U/P1D/P1L/P1R (Joystick) → Snake Direction
-//   - P1A (Button A) or START1 (Start Button) → Restart Game
-// =============================================================================
-
-const ARCADE_CONTROLS = {
-  // ===== PLAYER 1 CONTROLS =====
-  // Joystick - Left hand on WASD
-  'P1U': ['w'],
-  'P1D': ['s'],
-  'P1L': ['a'],
-  'P1R': ['d'],
-
-  // Action Buttons - Right hand on home row area (ergonomic!)
-  // Top row (ABC): U, I, O  |  Bottom row (XYZ): J, K, L
-  'P1A': ['u'],
-  'P1B': ['i'],
-  'P1C': ['o'],
-  'P1X': ['j'],
-  'P1Y': ['k'],
-  'P1Z': ['l'],
-
-  // Start Button
-  'START1': ['1', 'Enter'],
-
-  // ===== PLAYER 2 CONTROLS =====
-  // Joystick - Right hand on Arrow Keys
-  'P2U': ['ArrowUp'],
-  'P2D': ['ArrowDown'],
-  'P2L': ['ArrowLeft'],
-  'P2R': ['ArrowRight'],
-
-  // Action Buttons - Left hand (avoiding P1's WASD keys)
-  // Top row (ABC): R, T, Y  |  Bottom row (XYZ): F, G, H
-  'P2A': ['r'],
-  'P2B': ['t'],
-  'P2C': ['y'],
-  'P2X': ['f'],
-  'P2Y': ['g'],
-  'P2Z': ['h'],
-
-  // Start Button
-  'START2': ['2']
-};
-
-// Build reverse lookup: keyboard key → arcade button code
-const KEYBOARD_TO_ARCADE = {};
-for (const [arcadeCode, keyboardKeys] of Object.entries(ARCADE_CONTROLS)) {
-  if (keyboardKeys) {
-    // Handle both array and single value
-    const keys = Array.isArray(keyboardKeys) ? keyboardKeys : [keyboardKeys];
-    keys.forEach(key => {
-      KEYBOARD_TO_ARCADE[key] = arcadeCode;
-    });
-  }
-}
+// vibecodea.js - Versión final del juego
 
 const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
-  backgroundColor: '#000000',
-  scene: {
-    create: create,
-    update: update
-  }
+  backgroundColor: '#001a00',
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: { preload, create, update }
 };
 
-const game = new Phaser.Game(config);
+let player, cursors, humans, monsters, bananas, walls;
+let lives = 3, energy = 100, score = 0;
+let livesText, energyText, scoreText;
+let game;
+let lastAttack = 0;
+let humanSpawnDelay = 4000;
+let monsterSpawnDelay = 7000;
+let bananaSpawnDelay = 6000;
+let maxMonsters = 1;
+let deltaAccumulator = 0;
 
-// Game variables
-let snake = [];
-let snakeSize = 15;
-let direction = { x: 1, y: 0 };
-let nextDirection = { x: 1, y: 0 };
-let food;
-let score = 0;
-let scoreText;
-let titleBlocks = [];
-let gameOver = false;
-let moveTimer = 0;
-let moveDelay = 100;  // Faster initial speed (was 150ms)
-let graphics;
+window.onload = function() { game = new Phaser.Game(config); };
 
-// Pixel font patterns (5x5 grid for each letter)
-const letters = {
-  P: [[1,1,1,1],[1,0,0,1],[1,1,1,1],[1,0,0,0],[1,0,0,0]],
-  L: [[1,0,0,0],[1,0,0,0],[1,0,0,0],[1,0,0,0],[1,1,1,1]],
-  A: [[0,1,1,0],[1,0,0,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]],
-  T: [[1,1,1,1],[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]],
-  N: [[1,0,0,1],[1,1,0,1],[1,0,1,1],[1,0,0,1],[1,0,0,1]],
-  U: [[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,1,1,1]],
-  S: [[0,1,1,1],[1,0,0,0],[0,1,1,0],[0,0,0,1],[1,1,1,0]],
-  H: [[1,0,0,1],[1,0,0,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]],
-  C: [[0,1,1,1],[1,0,0,0],[1,0,0,0],[1,0,0,0],[0,1,1,1]],
-  K: [[1,0,0,1],[1,0,1,0],[1,1,0,0],[1,0,1,0],[1,0,0,1]],
-  '2': [[1,1,1,0],[0,0,0,1],[0,1,1,0],[1,0,0,0],[1,1,1,1]],
-  '5': [[1,1,1,1],[1,0,0,0],[1,1,1,0],[0,0,0,1],[1,1,1,0]],
-  ':': [[0,0,0,0],[0,1,0,0],[0,0,0,0],[0,1,0,0],[0,0,0,0]],
-  R: [[1,1,1,0],[1,0,0,1],[1,1,1,0],[1,0,1,0],[1,0,0,1]],
-  D: [[1,1,1,0],[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,1,1,0]],
-  E: [[1,1,1,1],[1,0,0,0],[1,1,1,0],[1,0,0,0],[1,1,1,1]]
-};
-
-// Bold font for ARCADE (filled/solid style)
-const boldLetters = {
-  A: [[1,1,1,1,1],[1,1,0,1,1],[1,1,1,1,1],[1,1,0,1,1],[1,1,0,1,1]],
-  R: [[1,1,1,1,0],[1,1,0,1,1],[1,1,1,1,0],[1,1,0,1,1],[1,1,0,1,1]],
-  C: [[1,1,1,1,1],[1,1,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,1,1]],
-  D: [[1,1,1,1,0],[1,1,0,1,1],[1,1,0,1,1],[1,1,0,1,1],[1,1,1,1,0]],
-  E: [[1,1,1,1,1],[1,1,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[1,1,1,1,1]]
-};
+function preload() {}
 
 function create() {
   const scene = this;
-  graphics = this.add.graphics();
+  scene.add.rectangle(400, 300, 800, 600, 0x001a00);
 
-  // Build "PLATANUS HACK ARCADE" in cyan - centered and grid-aligned
-  // PLATANUS: 8 letters × (4 cols + 1 spacing) = 40 blocks, but last letter no spacing = 39 blocks × 15px = 585px
-  let x = Math.floor((800 - 585) / 2 / snakeSize) * snakeSize;
-  let y = Math.floor(180 / snakeSize) * snakeSize;
-  'PLATANUS'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0x00ffff);
-  });
-
-  // HACK: 4 letters × (4 cols + 1 spacing) = 20 blocks, but last letter no spacing = 19 blocks × 15px = 285px
-  x = Math.floor((800 - 285) / 2 / snakeSize) * snakeSize;
-  y = Math.floor(280 / snakeSize) * snakeSize;
-  'HACK'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0x00ffff);
-  });
-
-  // ARCADE: 6 letters × (5 cols + 1 spacing) = 36 blocks, but last letter no spacing = 35 blocks × 15px = 525px
-  x = Math.floor((800 - 525) / 2 / snakeSize) * snakeSize;
-  y = Math.floor(380 / snakeSize) * snakeSize;
-  'ARCADE'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0xff00ff, true);
-  });
-
-  // Score display
-  scoreText = this.add.text(16, 16, 'Score: 0', {
-    fontSize: '24px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#00ff00'
-  });
-
-  // Instructions
-  this.add.text(400, 560, 'Use Joystick to Move | Avoid Walls, Yourself & The Title!', {
-    fontSize: '16px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#888888',
-    align: 'center'
-  }).setOrigin(0.5);
-
-  // Initialize snake (start top left)
-  snake = [
-    { x: 75, y: 60 },
-    { x: 60, y: 60 },
-    { x: 45, y: 60 }
+  // Laberinto bloques
+  walls = scene.physics.add.staticGroup();
+  const wallPositions = [
+      { x: 150, y: 100, w: 50, h: 50 }, { x: 450, y: 100, w: 50, h: 50 },
+      { x: 300, y: 300, w: 50, h: 50 }, { x: 600, y: 400, w: 50, h: 50 },
+      { x: 200, y: 450, w: 50, h: 50 }, { x: 500, y: 250, w: 50, h: 50 }
   ];
-
-  // Spawn initial food
-  spawnFood();
-
-  // Keyboard and Arcade Button input
-  this.input.keyboard.on('keydown', (event) => {
-    // Normalize keyboard input to arcade codes for easier testing
-    const key = KEYBOARD_TO_ARCADE[event.key] || event.key;
-
-    // Restart game (arcade buttons only)
-    if (gameOver && (key === 'P1A' || key === 'START1')) {
-      restartGame(scene);
-      return;
-    }
-
-    // Direction controls (keyboard keys get mapped to arcade codes)
-    if (key === 'P1U' && direction.y === 0) {
-      nextDirection = { x: 0, y: -1 };
-    } else if (key === 'P1D' && direction.y === 0) {
-      nextDirection = { x: 0, y: 1 };
-    } else if (key === 'P1L' && direction.x === 0) {
-      nextDirection = { x: -1, y: 0 };
-    } else if (key === 'P1R' && direction.x === 0) {
-      nextDirection = { x: 1, y: 0 };
-    }
+  wallPositions.forEach(w => {
+      const rect = scene.add.rectangle(w.x, w.y, w.w, w.h, 0x004400);
+      scene.physics.add.existing(rect, true);
+      walls.add(rect);
   });
 
-  playTone(this, 440, 0.1);
+  // Jugador
+  player = scene.add.text(120, 120, '🐕', { fontSize: '32px' });
+  scene.physics.add.existing(player);
+  player.body.setCollideWorldBounds(true);
+  player.body.setSize(32,32);
+  player.setOrigin(0.5,0.5);
+
+  // Grupos
+  humans = scene.physics.add.group();
+  monsters = scene.physics.add.group();
+  bananas = scene.physics.add.group();
+
+  // Spawn inicial humano
+  spawnHuman(scene);
+
+  // UI
+  livesText = scene.add.text(10, 30, 'Vidas: ' + lives, { fontSize: '18px', fill: '#fff' });
+  energyText = scene.add.text(10, 50, 'Energía: ' + Math.floor(energy), { fontSize: '18px', fill: '#fff' });
+  scoreText = scene.add.text(10, 10, 'Puntos: ' + score, { fontSize: '18px', fill: '#fff' });
+
+  // Controles WASD
+  cursors = scene.input.keyboard.addKeys({
+      up: 'W', down: 'S', left: 'A', right: 'D', space: 'SPACE'
+  });
+  scene.input.keyboard.on('keydown-SPACE', () => attack(scene));
+
+  // Colisiones
+  scene.physics.add.collider(player, walls);
+  scene.physics.add.collider(monsters, walls);
+  scene.physics.add.collider(humans, walls);
+  scene.physics.add.collider(bananas, walls);
+
+  // Overlaps
+  scene.physics.add.overlap(player, humans, (p,h) => rescueHuman(scene,h));
+  scene.physics.add.overlap(player, bananas, (p,b) => collectBanana(scene,b));
+  scene.physics.add.overlap(player, monsters, (p,m) => hitMonster(scene,m));
+
+  // Spawn continuo
+  scene.time.addEvent({ delay: humanSpawnDelay, loop: true, callback: () => spawnHuman(scene) });
+  scene.time.addEvent({ delay: monsterSpawnDelay, loop: true, callback: () => {
+      if (monsters.getLength() < maxMonsters) spawnMonster(scene);
+  }});
+  scene.time.addEvent({ delay: bananaSpawnDelay, loop: true, callback: () => spawnBanana(scene) });
 }
 
-function drawLetter(char, startX, startY, color, useBold = false) {
-  const pattern = useBold ? boldLetters[char] : letters[char];
-  if (!pattern) return startX + 30;
+function update(time, delta) {
+  if (!player.body) return;
 
-  for (let row = 0; row < pattern.length; row++) {
-    for (let col = 0; col < pattern[row].length; col++) {
-      if (pattern[row][col]) {
-        const blockX = startX + col * snakeSize;
-        const blockY = startY + row * snakeSize;
-        titleBlocks.push({ x: blockX, y: blockY, color: color });
+  // Movimiento
+  player.body.setVelocity(0);
+  if (cursors.left.isDown) { 
+      player.body.setVelocityX(-200); 
+      player.setScale(-1,1); // Reflejo a la izquierda
+  } else if (cursors.right.isDown) { 
+      player.body.setVelocityX(200); 
+      player.setScale(1,1); // Reflejo a la derecha
+  }
+  if (cursors.up.isDown) player.body.setVelocityY(-200);
+  else if (cursors.down.isDown) player.body.setVelocityY(200);
+  if ((cursors.left.isDown||cursors.right.isDown) && (cursors.up.isDown||cursors.down.isDown))
+      player.body.velocity.normalize().scale(200);
+
+  // Energía pasiva
+  if (energy < 100) energy += 0.05;
+  energyText.setText('Energía: ' + Math.floor(energy));
+
+  // Temporizador humanos
+  deltaAccumulator += delta;
+  if(deltaAccumulator >= 16){
+      humans.getChildren().slice().forEach(h => {
+          if (!h.active) return;
+          if (!h.timer) h.timer = 8;
+          h.timer = Math.max(0, h.timer - deltaAccumulator/1000);
+          if (!h.timerText) h.timerText = h.scene.add.text(h.x,h.y-20,Math.ceil(h.timer),{fontSize:'16px',fill:'#00ff00'}).setOrigin(0.5);
+          h.timerText.setText(Math.ceil(h.timer));
+          h.timerText.setColor(h.timer<=3?'#ff0000':'#00ff00');
+          h.timerText.visible = h.timer>0 && (h.timer<=3 ? Math.floor(Date.now()/200)%2===0 : true);
+
+          if (h.timer <= 0) {
+              if(h.timerText){ h.timerText.destroy(); h.timerText=null; }
+              let m = h.scene.add.text(h.x,h.y,'🧟‍♀️',{fontSize:'32px'});
+              h.scene.physics.add.existing(m);
+              m.body.setCollideWorldBounds(true);
+              m.body.setSize(32,32);
+              monsters.add(m);
+              score = Math.max(0, score-50);
+              scoreText.setText('Puntos: ' + score);
+              h.destroy();
+          }
+      });
+      deltaAccumulator = 0;
+  }
+
+  // Monstruos
+  monsters.getChildren().forEach(m => {
+      if (!m.body) return;
+      if (!m.nextTargetTime) m.nextTargetTime = 0;
+      if (game.scene.scenes[0].time.now > m.nextTargetTime) {
+          m.nextTargetTime = game.scene.scenes[0].time.now + 500;
+          let closest = null, minDist = 9999;
+          humans.getChildren().forEach(h => {
+              if (!h.active) return;
+              const d = Phaser.Math.Distance.Between(m.x,m.y,h.x,h.y);
+              if (d < minDist) { minDist=d; closest=h; }
+          });
+          const dPlayer = Phaser.Math.Distance.Between(m.x,m.y,player.x,player.y);
+          if (dPlayer < minDist) { minDist=dPlayer; closest=player; }
+
+          if (closest) {
+              let dx = closest.x - m.x, dy = closest.y - m.y;
+              m.body.setVelocity(dx*0.6, dy*0.6);
+              if (humans.contains(closest) && Phaser.Math.Distance.Between(m.x,m.y,closest.x,closest.y)<20) {
+                  if(closest.timerText){ closest.timerText.destroy(); closest.timerText=null; }
+                  let mm = m.scene.add.text(closest.x,closest.y,'🧟‍♀️',{fontSize:'32px'});
+                  m.scene.physics.add.existing(mm);
+                  mm.body.setCollideWorldBounds(true);
+                  mm.body.setSize(32,32);
+                  monsters.add(mm);
+                  score = Math.max(0, score-50);
+                  scoreText.setText('Puntos: ' + score);
+                  closest.destroy();
+              }
+          } else m.body.setVelocity(0);
       }
-    }
-  }
-  return startX + (pattern[0].length + 1) * snakeSize;
-}
-
-function update(_time, delta) {
-  if (gameOver) return;
-
-  moveTimer += delta;
-  if (moveTimer >= moveDelay) {
-    moveTimer = 0;
-    direction = nextDirection;
-    moveSnake(this);
-  }
-
-  drawGame();
-}
-
-function moveSnake(scene) {
-  const head = snake[0];
-  const newHead = {
-    x: head.x + direction.x * snakeSize,
-    y: head.y + direction.y * snakeSize
-  };
-
-  // Check wall collision
-  if (newHead.x < 0 || newHead.x >= 800 || newHead.y < 0 || newHead.y >= 600) {
-    endGame(scene);
-    return;
-  }
-
-  // Check self collision
-  for (let segment of snake) {
-    if (segment.x === newHead.x && segment.y === newHead.y) {
-      endGame(scene);
-      return;
-    }
-  }
-
-  // Check title block collision
-  for (let block of titleBlocks) {
-    if (newHead.x === block.x && newHead.y === block.y) {
-      endGame(scene);
-      return;
-    }
-  }
-
-  snake.unshift(newHead);
-
-  // Check food collision
-  if (newHead.x === food.x && newHead.y === food.y) {
-    score += 10;
-    scoreText.setText('Score: ' + score);
-    spawnFood();
-    playTone(scene, 880, 0.1);
-
-    if (moveDelay > 50) {  // Faster max speed (was 80ms)
-      moveDelay -= 2;
-    }
-  } else {
-    snake.pop();
-  }
-}
-
-function spawnFood() {
-  let valid = false;
-  let attempts = 0;
-
-  while (!valid && attempts < 100) {
-    attempts++;
-    const gridX = Math.floor(Math.random() * 53) * snakeSize;
-    const gridY = Math.floor(Math.random() * 40) * snakeSize;
-
-    // Check not on snake
-    let onSnake = false;
-    for (let segment of snake) {
-      if (segment.x === gridX && segment.y === gridY) {
-        onSnake = true;
-        break;
-      }
-    }
-
-    // Check not on title blocks
-    let onTitle = false;
-    for (let block of titleBlocks) {
-      if (gridX === block.x && gridY === block.y) {
-        onTitle = true;
-        break;
-      }
-    }
-
-    if (!onSnake && !onTitle) {
-      food = { x: gridX, y: gridY };
-      valid = true;
-    }
-  }
-}
-
-function drawGame() {
-  graphics.clear();
-
-  // Draw title blocks
-  titleBlocks.forEach(block => {
-    graphics.fillStyle(block.color, 1);
-    graphics.fillRect(block.x, block.y, snakeSize - 2, snakeSize - 2);
-  });
-
-  // Draw snake
-  snake.forEach((segment, index) => {
-    if (index === 0) {
-      graphics.fillStyle(0x00ff00, 1);
-    } else {
-      graphics.fillStyle(0x00aa00, 1);
-    }
-    graphics.fillRect(segment.x, segment.y, snakeSize - 2, snakeSize - 2);
-  });
-
-  // Draw food
-  graphics.fillStyle(0xff0000, 1);
-  graphics.fillRect(food.x, food.y, snakeSize - 2, snakeSize - 2);
-}
-
-function endGame(scene) {
-  gameOver = true;
-  playTone(scene, 220, 0.5);
-
-  // Semi-transparent overlay
-  const overlay = scene.add.graphics();
-  overlay.fillStyle(0x000000, 0.7);
-  overlay.fillRect(0, 0, 800, 600);
-
-  // Game Over title with glow effect
-  const gameOverText = scene.add.text(400, 300, 'GAME OVER', {
-    fontSize: '64px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#ff0000',
-    align: 'center',
-    stroke: '#ff6666',
-    strokeThickness: 8
-  }).setOrigin(0.5);
-
-  // Pulsing animation for game over text
-  scene.tweens.add({
-    targets: gameOverText,
-    scale: { from: 1, to: 1.1 },
-    alpha: { from: 1, to: 0.8 },
-    duration: 800,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut'
-  });
-
-  // Score display
-  scene.add.text(400, 400, 'SCORE: ' + score, {
-    fontSize: '36px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#00ffff',
-    align: 'center',
-    stroke: '#000000',
-    strokeThickness: 4
-  }).setOrigin(0.5);
-
-  // Restart instruction with subtle animation
-  const restartText = scene.add.text(400, 480, 'Press Button A or START to Restart', {
-    fontSize: '24px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#ffff00',
-    align: 'center',
-    stroke: '#000000',
-    strokeThickness: 3
-  }).setOrigin(0.5);
-
-  // Blinking animation for restart text
-  scene.tweens.add({
-    targets: restartText,
-    alpha: { from: 1, to: 0.3 },
-    duration: 600,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut'
   });
 }
 
-function restartGame(scene) {
-  snake = [
-    { x: 75, y: 60 },
-    { x: 60, y: 60 },
-    { x: 45, y: 60 }
-  ];
-  direction = { x: 1, y: 0 };
-  nextDirection = { x: 1, y: 0 };
-  score = 0;
-  gameOver = false;
-  moveDelay = 100;  // Match new faster initial speed
-  scoreText.setText('Score: 0');
-  spawnFood();
-  scene.scene.restart();
+// Ataque
+function attack(scene){
+  const now = Date.now();
+  if (now - lastAttack < 700) return;
+  if (energy < 30) return;
+  lastAttack = now;
+  energy -= 30;
+  energyText.setText('Energía: ' + Math.floor(energy));
+
+  const wave = scene.add.circle(player.x,player.y,60,0xffff00,0.18);
+  scene.tweens.add({ targets: wave, alpha:0, duration:350, onComplete:()=>wave.destroy() });
+
+  let nearest = null, minDist = 9999;
+  monsters.getChildren().forEach(m => {
+      const d = Phaser.Math.Distance.Between(player.x,player.y,m.x,m.y);
+      if(d < minDist){ minDist = d; nearest = m; }
+  });
+  if(nearest){ nearest.destroy(); score += 30; scoreText.setText('Puntos: '+score); }
 }
 
-function playTone(scene, frequency, duration) {
-  const audioContext = scene.sound.context;
-  const oscillator = audioContext.createOscillator();
-  const gainNode = audioContext.createGain();
+// Spawn humano
+function spawnHuman(scene){
+  let pos = getFreePosition(scene);
+  let h = scene.add.text(pos.x,pos.y,'🧍',{ fontSize:'32px' });
+  scene.physics.add.existing(h);
+  h.body.setCollideWorldBounds(true);
+  h.body.setSize(32,32);
+  humans.add(h);
+}
 
-  oscillator.connect(gainNode);
-  gainNode.connect(audioContext.destination);
+// Spawn monstruo
+function spawnMonster(scene){
+  let pos = getFreePosition(scene);
+  let m = scene.add.text(pos.x,pos.y,'🧟‍♀️',{ fontSize:'32px' });
+  scene.physics.add.existing(m);
+  m.body.setCollideWorldBounds(true);
+  m.body.setSize(32,32);
+  monsters.add(m);
+}
 
-  oscillator.frequency.value = frequency;
-  oscillator.type = 'square';
+// Spawn plátano/bomba
+function spawnBanana(scene){
+  let pos = getFreePosition(scene);
+  let isBomb = score>=200 && Math.random()<0.3;
+  let b = scene.add.text(pos.x,pos.y,isBomb?'💣':'🍌',{ fontSize:'32px' });
+  scene.physics.add.existing(b);
+  b.body.setImmovable(true);
+  bananas.add(b);
+  if(isBomb){
+      scene.physics.add.overlap(player,b,()=>{
+          b.destroy();
+          lives = Math.max(0,lives-1);
+          livesText.setText('Vidas: '+lives);
+          if(lives<=0) gameOver(scene);
+      });
+  }
+}
 
-  gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+// Rescatar humano
+function rescueHuman(scene,h){
+  if(h.timerText) h.timerText.destroy();
+  h.destroy();
+  lives = Math.min(5,lives+1);
+  score += 50;
+  livesText.setText('Vidas: '+lives);
+  scoreText.setText('Puntos: '+score);
+}
 
-  oscillator.start(audioContext.currentTime);
-  oscillator.stop(audioContext.currentTime + duration);
+// Recoger plátano
+function collectBanana(scene,b){
+  b.destroy();
+  energy = Math.min(100,energy+20);
+  energyText.setText('Energía: '+Math.floor(energy));
+  score += 20;
+  scoreText.setText('Puntos: '+score);
+}
+
+// Ser tocado por monstruo
+function hitMonster(scene,m){
+  m.destroy();
+  lives = Math.max(0,lives-1);
+  livesText.setText('Vidas: '+lives);
+  score = Math.max(0,score-20);
+  scoreText.setText('Puntos: '+score);
+  if(lives<=0) gameOver(scene);
+}
+
+// Game over
+function gameOver(scene){
+  const msg = scene.add.text(400,300,'GAME OVER',{fontSize:'48px',fill:'#ff4444'}).setOrigin(0.5);
+  player.body.setVelocity(0);
+  scene.time.addEvent({ delay:3000, callback:()=>{ scene.scene.restart(); } });
+}
+
+// Posición libre
+function getFreePosition(scene){
+  let x,y,tries=0;
+  do{
+      x = Phaser.Math.Between(50,750);
+      y = Phaser.Math.Between(50,550);
+      tries++;
+      if(tries>80) break;
+  }while(walls.getChildren().some(w=>Phaser.Geom.Intersects.RectangleToRectangle(
+      new Phaser.Geom.Rectangle(x-16,y-16,32,32),w.getBounds()
+  )));
+  return {x,y};
 }
