@@ -1,5 +1,4 @@
-// vibecodea.js - Versión final del juego
-
+// vibecodea.js - Juego infinito completo con reflejo correcto del perrito
 const config = {
   type: Phaser.AUTO,
   width: 800,
@@ -18,7 +17,6 @@ let humanSpawnDelay = 4000;
 let monsterSpawnDelay = 7000;
 let bananaSpawnDelay = 6000;
 let maxMonsters = 1;
-let deltaAccumulator = 0;
 
 window.onload = function() { game = new Phaser.Game(config); };
 
@@ -28,7 +26,7 @@ function create() {
   const scene = this;
   scene.add.rectangle(400, 300, 800, 600, 0x001a00);
 
-  // Laberinto bloques
+  // laberinto bloques
   walls = scene.physics.add.staticGroup();
   const wallPositions = [
       { x: 150, y: 100, w: 50, h: 50 }, { x: 450, y: 100, w: 50, h: 50 },
@@ -41,19 +39,20 @@ function create() {
       walls.add(rect);
   });
 
-  // Jugador
+  // jugador
   player = scene.add.text(120, 120, '🐕', { fontSize: '32px' });
   scene.physics.add.existing(player);
   player.body.setCollideWorldBounds(true);
   player.body.setSize(32,32);
   player.setOrigin(0.5,0.5);
+  player.setScale(1,1); // Inicia apuntando a la izquierda
 
-  // Grupos
+  // grupos
   humans = scene.physics.add.group();
   monsters = scene.physics.add.group();
   bananas = scene.physics.add.group();
 
-  // Spawn inicial humano
+  // spawn inicial: jugador + humano
   spawnHuman(scene);
 
   // UI
@@ -61,24 +60,24 @@ function create() {
   energyText = scene.add.text(10, 50, 'Energía: ' + Math.floor(energy), { fontSize: '18px', fill: '#fff' });
   scoreText = scene.add.text(10, 10, 'Puntos: ' + score, { fontSize: '18px', fill: '#fff' });
 
-  // Controles WASD
+  // controles WASD
   cursors = scene.input.keyboard.addKeys({
       up: 'W', down: 'S', left: 'A', right: 'D', space: 'SPACE'
   });
   scene.input.keyboard.on('keydown-SPACE', () => attack(scene));
 
-  // Colisiones
+  // colisiones
   scene.physics.add.collider(player, walls);
   scene.physics.add.collider(monsters, walls);
   scene.physics.add.collider(humans, walls);
   scene.physics.add.collider(bananas, walls);
 
-  // Overlaps
+  // overlaps
   scene.physics.add.overlap(player, humans, (p,h) => rescueHuman(scene,h));
   scene.physics.add.overlap(player, bananas, (p,b) => collectBanana(scene,b));
   scene.physics.add.overlap(player, monsters, (p,m) => hitMonster(scene,m));
 
-  // Spawn continuo
+  // spawn continuo
   scene.time.addEvent({ delay: humanSpawnDelay, loop: true, callback: () => spawnHuman(scene) });
   scene.time.addEvent({ delay: monsterSpawnDelay, loop: true, callback: () => {
       if (monsters.getLength() < maxMonsters) spawnMonster(scene);
@@ -86,34 +85,42 @@ function create() {
   scene.time.addEvent({ delay: bananaSpawnDelay, loop: true, callback: () => spawnBanana(scene) });
 }
 
+// temporizador de humanos
+let deltaAccumulator = 0;
 function update(time, delta) {
   if (!player.body) return;
 
-  // Movimiento
+  // movimiento
   player.body.setVelocity(0);
   if (cursors.left.isDown) { 
       player.body.setVelocityX(-200); 
-      player.setScale(-1,1); // Reflejo a la izquierda
+      player.setScale(1,1); // apunta a la izquierda
   } else if (cursors.right.isDown) { 
       player.body.setVelocityX(200); 
-      player.setScale(1,1); // Reflejo a la derecha
+      player.setScale(-1,1); // apunta a la derecha
   }
   if (cursors.up.isDown) player.body.setVelocityY(-200);
   else if (cursors.down.isDown) player.body.setVelocityY(200);
   if ((cursors.left.isDown||cursors.right.isDown) && (cursors.up.isDown||cursors.down.isDown))
       player.body.velocity.normalize().scale(200);
 
-  // Energía pasiva
+  // energía pasiva
   if (energy < 100) energy += 0.05;
   energyText.setText('Energía: ' + Math.floor(energy));
 
-  // Temporizador humanos
+  // decremento temporizador humanos
   deltaAccumulator += delta;
   if(deltaAccumulator >= 16){
       humans.getChildren().slice().forEach(h => {
           if (!h.active) return;
-          if (!h.timer) h.timer = 8;
+          if (!h.timer) {
+              if (score >= 500) h.timer = 5;
+              else if (score >= 400) h.timer = 6;
+              else if (score >= 300) h.timer = 7;
+              else h.timer = 8;
+          }
           h.timer = Math.max(0, h.timer - deltaAccumulator/1000);
+
           if (!h.timerText) h.timerText = h.scene.add.text(h.x,h.y-20,Math.ceil(h.timer),{fontSize:'16px',fill:'#00ff00'}).setOrigin(0.5);
           h.timerText.setText(Math.ceil(h.timer));
           h.timerText.setColor(h.timer<=3?'#ff0000':'#00ff00');
@@ -134,7 +141,7 @@ function update(time, delta) {
       deltaAccumulator = 0;
   }
 
-  // Monstruos
+  // monstruos
   monsters.getChildren().forEach(m => {
       if (!m.body) return;
       if (!m.nextTargetTime) m.nextTargetTime = 0;
@@ -168,7 +175,7 @@ function update(time, delta) {
   });
 }
 
-// Ataque
+// ataque
 function attack(scene){
   const now = Date.now();
   if (now - lastAttack < 700) return;
@@ -180,15 +187,17 @@ function attack(scene){
   const wave = scene.add.circle(player.x,player.y,60,0xffff00,0.18);
   scene.tweens.add({ targets: wave, alpha:0, duration:350, onComplete:()=>wave.destroy() });
 
-  let nearest = null, minDist = 9999;
-  monsters.getChildren().forEach(m => {
+  monsters.getChildren().slice().forEach(m=>{
       const d = Phaser.Math.Distance.Between(player.x,player.y,m.x,m.y);
-      if(d < minDist){ minDist = d; nearest = m; }
+      if(d<=60){ 
+          m.destroy(); 
+          score += 30; 
+          scoreText.setText('Puntos: '+score); 
+      }
   });
-  if(nearest){ nearest.destroy(); score += 30; scoreText.setText('Puntos: '+score); }
 }
 
-// Spawn humano
+// spawn humano
 function spawnHuman(scene){
   let pos = getFreePosition(scene);
   let h = scene.add.text(pos.x,pos.y,'🧍',{ fontSize:'32px' });
@@ -198,7 +207,7 @@ function spawnHuman(scene){
   humans.add(h);
 }
 
-// Spawn monstruo
+// spawn monstruo
 function spawnMonster(scene){
   let pos = getFreePosition(scene);
   let m = scene.add.text(pos.x,pos.y,'🧟‍♀️',{ fontSize:'32px' });
@@ -208,7 +217,7 @@ function spawnMonster(scene){
   monsters.add(m);
 }
 
-// Spawn plátano/bomba
+// spawn plátano/bomba
 function spawnBanana(scene){
   let pos = getFreePosition(scene);
   let isBomb = score>=200 && Math.random()<0.3;
@@ -226,7 +235,7 @@ function spawnBanana(scene){
   }
 }
 
-// Rescatar humano
+// rescatar humano
 function rescueHuman(scene,h){
   if(h.timerText) h.timerText.destroy();
   h.destroy();
@@ -236,7 +245,7 @@ function rescueHuman(scene,h){
   scoreText.setText('Puntos: '+score);
 }
 
-// Recoger plátano
+// recoger plátano
 function collectBanana(scene,b){
   b.destroy();
   energy = Math.min(100,energy+20);
@@ -245,7 +254,7 @@ function collectBanana(scene,b){
   scoreText.setText('Puntos: '+score);
 }
 
-// Ser tocado por monstruo
+// ser tocado por monstruo
 function hitMonster(scene,m){
   m.destroy();
   lives = Math.max(0,lives-1);
@@ -255,14 +264,14 @@ function hitMonster(scene,m){
   if(lives<=0) gameOver(scene);
 }
 
-// Game over
+// game over
 function gameOver(scene){
   const msg = scene.add.text(400,300,'GAME OVER',{fontSize:'48px',fill:'#ff4444'}).setOrigin(0.5);
   player.body.setVelocity(0);
   scene.time.addEvent({ delay:3000, callback:()=>{ scene.scene.restart(); } });
 }
 
-// Posición libre
+// posición libre
 function getFreePosition(scene){
   let x,y,tries=0;
   do{
